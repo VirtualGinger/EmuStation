@@ -2,7 +2,10 @@
 #include "imgui_impl_sdl2.h" // Inputs
 #include "imgui_impl_opengl3.h" // Draws output via opengl3
 #include <SDL.h> // Handles window & OpenGL3 context
-#include <GLES3/gl3.h> 
+#include <GLES3/gl3.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -10,6 +13,8 @@
 
 #define WINDOW_LENGTH 1280
 #define WINDOW_WIDTH 720
+
+static pid_t launch_rpcs3();
 
 int main(int argc, char** argv){
     // Windowed option to help me debug
@@ -28,7 +33,7 @@ int main(int argc, char** argv){
     if (!windowed) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
     SDL_Window* window = SDL_CreateWindow(
-        "PS3 Frontend",
+        "EmuStation Home",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         WINDOW_LENGTH,
@@ -64,12 +69,36 @@ int main(int argc, char** argv){
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
     ImGui_ImplOpenGL3_Init("#version 300 es");
 
+    pid_t child = -1;
+    std::string status;
+
     bool running = true;
     while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            ImGui_ImplSDL2_ProcessEvent(&e);
-            if (e.type == SDL_QUIT) running = false;
+        // While RPCS3 is running: don't render, don't feed input to ImGui.
+        if (child > 0){
+            int exitStatus = 0;
+            pid_t waitResult = waitpid(child, &exitStatus, WNOHANG);
+            if (waitResult == child || waitResult == -1) {
+                child = -1;
+                if (WIFEXITED(exitStatus) && WEXITSTATUS(exitStatus) == 127)
+                    status = "Could not start RPCS3. Check RPCS3_PATH.";
+                else
+                    status = "";
+            } else{
+                SDL_Event waitEvent;
+                if (SDL_WaitEventTimeout(&waitEvent, 250)) {
+                    do {
+                        if (waitEvent.type == SDL_QUIT) running = false;
+                    } while (SDL_PollEvent(&waitEvent));
+                }
+                continue;
+            }
+        }
+
+        SDL_Event event;
+        while (SDL_PollEvent(&event)){
+            ImGui_ImplSDL2_ProcessEvent(&event);
+            if (event.type == SDL_QUIT) running = false;
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -84,6 +113,21 @@ int main(int argc, char** argv){
             nullptr,
             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground
         );
+
+        const ImVec2 btn(420.0f, 90.0f);
+        ImGui::SetCursorPos(ImVec2((vp->WorkSize.x - btn.x) * 0.5f, (vp->WorkSize.y - btn.y) * 0.5f));
+        if (ImGui::Button("Launch RPCS3", btn)){
+            child = launch_rpcs3();
+            if (child < 0) status = "fork() failed.";
+        }
+        ImGui::SetItemDefaultFocus();
+
+        if (!status.empty()) {
+            float w = ImGui::CalcTextSize(status.c_str()).x;
+            ImGui::SetCursorPosX((vp->WorkSize.x - w) * 0.5f);
+            ImGui::TextUnformatted(status.c_str());
+        }
+
         ImGui::End();
         ImGui::Render();
         glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
@@ -100,4 +144,15 @@ int main(int argc, char** argv){
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
+}
+
+static pid_t launch_rpcs3(){
+    pid_t pid = fork();
+    if (pid == 0) {
+        // ** NOTE ** Need to connect path to RPCS3 when imported into repository here.
+        const char* path = std::getenv("RPCS3_PATH");
+        execlp(path, path, (char*)nullptr);
+        _exit(127); // exec failed
+    }
+    return pid;
 }
