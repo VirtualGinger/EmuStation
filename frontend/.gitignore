@@ -1,3 +1,7 @@
 frontend/imgui/
 frontend/build/
 frontend/frontend
+frontend/frontend.exe
+build/
+frontend.exe
+imgui/
