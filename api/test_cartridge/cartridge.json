@@ -1,0 +1,10 @@
+{
+    "cartridge_id": "CART-001",
+    "game": {
+        "id": "crash-bandicoot",
+        "title": "Crash Bandicoot",
+        "platform": "PS3",
+        "file": "games/crash-bandicoot.chd",
+        "cover": "cover.jpg"
+    }
+}
