@@ -1,0 +1,10 @@
+{
+  "emulators": {
+    "rpcs3": {
+      "name": "RPCS3",
+      "executable": "rpcs3",
+      "platforms": ["PS3"],
+      "arguments": ["{game_path}"]
+    }
+  }
+}
