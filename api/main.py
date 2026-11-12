@@ -14,7 +14,7 @@ from services.process_manager import ProcessManager
 
 BASE_DIR = Path(__file__).parent
 
-CARTRIDGE_PATH = BASE_DIR / "test_cartridge"
+CARTRIDGE_PATH = None
 EMULATOR_CONFIG = BASE_DIR / "config" / "emulators.json"
 
 

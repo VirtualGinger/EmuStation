@@ -3,6 +3,7 @@ import json
 import pytest
 
 from services.metadata_manager import read_metadata
+from services.metadata_manager import _find_ps3_game, _read_ps3_metadata
 
 
 def test_read_valid_metadata(valid_cartridge):
@@ -78,3 +79,31 @@ def test_missing_platform(valid_cartridge):
 
     with pytest.raises(ValueError):
         read_metadata(valid_cartridge)
+
+
+
+
+
+def test_find_ps3_game_at_usb_root(tmp_path):
+    ps3_game = tmp_path / "PS3_GAME"
+    ps3_game.mkdir()
+    (ps3_game / "PARAM.SFO").touch()
+
+    result = _find_ps3_game(tmp_path)
+
+    assert result == ps3_game
+
+
+def test_find_ps3_game_inside_game_folder(tmp_path):
+    ps3_game = tmp_path / "God of War" / "PS3_GAME"
+    ps3_game.mkdir(parents=True)
+    (ps3_game / "PARAM.SFO").touch()
+
+    result = _find_ps3_game(tmp_path)
+
+    assert result == ps3_game
+
+
+def test_missing_ps3_game_folder(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        _find_ps3_game(tmp_path)

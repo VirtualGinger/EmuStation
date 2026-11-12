@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,7 +14,7 @@ def launch_game(request: Request):
     emulator_manager = app.state.emulator_manager
     process_manager = app.state.process_manager
 
-    # Check cartridge status
+    # Check cartridge status.
     status = cartridge_manager.get_status()
 
     if status["status"] != "ready":
@@ -24,20 +25,42 @@ def launch_game(request: Request):
 
     game = status["game"]
 
-    # Get the actual game file path
+    # Resolve and validate the game path.
     cartridge_path = Path(cartridge_manager.cartridge_path).resolve()
     game_path = (cartridge_path / game["file"]).resolve()
 
-    if not game_path.is_relative_to(cartridge_path) or not game_path.is_file():
+    if not game_path.is_relative_to(cartridge_path):
         raise HTTPException(
             status_code=400,
-            detail="Game file is missing or invalid"
+            detail="Invalid game path"
         )
 
-    # Select emulator and prepare command
+    platform = game["platform"].strip().upper()
+
+    if platform == "PS3":
+        # RPCS3 needs the game directory containing PS3_GAME.
+        if not (
+            game_path.is_dir()
+            and (game_path / "PS3_GAME").is_dir()
+            and (game_path / "PS3_GAME" / "PARAM.SFO").is_file()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid PS3 game directory"
+            )
+
+    else:
+        # Other platforms currently use individual game files.
+        if not game_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail="Game file is missing or invalid"
+            )
+
+    # Select emulator and prepare command.
     try:
         command = emulator_manager.build_command(
-            game["platform"],
+            platform,
             game_path
         )
     except ValueError as error:
@@ -46,7 +69,7 @@ def launch_game(request: Request):
             detail=str(error)
         )
 
-    # Start emulator
+    # Start emulator.
     try:
         result = process_manager.start(command)
     except RuntimeError as error:

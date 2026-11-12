@@ -15,9 +15,9 @@ OBJ := $(SRC:%.cpp=build/%.o)
 
 CXXFLAGS := -O2 -std=c++17 -Wall -MMD -MP \
             -I$(IMGUI) -I$(IMGUI)/backends \
-            $(shell pkg-config --cflags sdl2 libcurl)
+            $(shell pkg-config --libs sdl2 SDL2_image libcurl)
 
-LDLIBS := $(shell pkg-config --libs sdl2 libcurl) -lopengl32
+LDLIBS := $(shell pkg-config --libs sdl2 SDL2_image libcurl) -lopengl32
 
 .PHONY: all run clean distclean
 
