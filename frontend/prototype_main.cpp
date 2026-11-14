@@ -390,6 +390,9 @@ int main(int argc, char** argv) {
             if (event.type == SDL_QUIT) {
                 running = false;
             }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+                running = false;
+	    }
         }
 
         const Uint32 currentTime = SDL_GetTicks();

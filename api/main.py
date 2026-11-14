@@ -14,11 +14,14 @@ from services.process_manager import ProcessManager
 
 BASE_DIR = Path(__file__).parent
 
-CARTRIDGE_PATH = None
+CARTRIDGE_PATH = Path("/mnt/emustation-usb")
 EMULATOR_CONFIG = BASE_DIR / "config" / "emulators.json"
 
 
-cartridge_manager = CartridgeManager(CARTRIDGE_PATH)
+cartridge_manager = CartridgeManager(
+    CARTRIDGE_PATH,
+    scan_usb=False
+)
 emulator_manager = EmulatorManager(EMULATOR_CONFIG)
 process_manager = ProcessManager()
 

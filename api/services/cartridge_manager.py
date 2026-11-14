@@ -129,5 +129,5 @@ class CartridgeManager:
 
     async def monitor(self):
         while True:
-            self.detect_cartridge()
+            await asyncio.to_thread(self.detect_cartridge)
             await asyncio.sleep(1)
