@@ -18,7 +18,7 @@ def valid_cartridge(tmp_path):
         "game": {
             "id": "crash-bandicoot",
             "title": "Crash Bandicoot",
-            "platform": "PS1",
+            "platform": "PS3",
             "file": "games/crash-bandicoot.chd",
             "cover": "cover.jpg"
         }

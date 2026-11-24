@@ -92,7 +92,7 @@ def test_cartridge_reinsertion(valid_cartridge):
         "game": {
             "id": "crash-bandicoot",
             "title": "Crash Bandicoot",
-            "platform": "PS1",
+            "platform": "PS3",
             "file": "games/crash-bandicoot.chd"
         }
     }

@@ -2,7 +2,7 @@
   "emulators": {
     "rpcs3": {
       "name": "RPCS3",
-      "executable": "rpcs3",
+      "executable": "/home/Zach/Downloads/rpcs3-v0.0.43-20583-9b8974d3_linux_aarch64.AppImage",
       "platforms": ["PS3"],
       "arguments": ["{game_path}"]
     }
