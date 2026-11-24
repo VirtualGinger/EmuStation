@@ -17,14 +17,18 @@ In our testing/developing phase we have two differing way in which we can test t
 
 ### Windows:
 ```
+// Dependencies (MSYS2)
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_image mingw-w64-ucrt-x86_64-curl mingw-w64-ucrt-x86_64-nlohmann-json
+
+// Run (from Git Bash, PowerShell or cmd; use mingw32-make, not make)
 cd frontend
-make -f Makefile.windows run
+mingw32-make -f Makefile.windows run
 ```
 
 ### Linux
 ```
 // Dependencies
-sudo apt install build-essential pkg-config /libsdl2-dev libgles2-mesa-dev
+sudo apt install build-essential pkg-config libsdl2-dev libsdl2-image-dev libcurl4-openssl-dev nlohmann-json3-dev libgles2-mesa-dev
 
 // Run
 cd frontend
