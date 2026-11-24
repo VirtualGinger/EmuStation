@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 
@@ -42,8 +43,18 @@ class EmulatorManager:
         executable = emulator.get("executable")
         arguments = emulator.get("arguments", [])
 
-        if not isinstance(executable, str) or not executable.strip():
+        if not isinstance(executable, str):
             raise ValueError("Invalid emulator executable")
+
+        executable = os.path.expandvars(executable)
+
+        if not executable.strip():
+            raise ValueError("Invalid emulator executable")
+
+        if "$" in executable:
+            raise ValueError(
+                f"Environment variable not set for emulator executable: {executable}"
+            )
 
         if not isinstance(arguments, list):
             raise ValueError("Emulator arguments must be a list")

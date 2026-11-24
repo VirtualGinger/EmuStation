@@ -1,6 +1,3 @@
-
-#!/bin/bash
-
 set -e
 
 PROJECT_DIR="$HOME/EmuStation/EmuStation"

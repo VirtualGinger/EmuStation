@@ -34,15 +34,3 @@ sudo apt install build-essential pkg-config libsdl2-dev libsdl2-image-dev libcur
 cd frontend
 make 
 ```
-
-## Animated Background
-The home screen draws a procedural wave background (`background/animated_background/`) entirely in a GLSL fragment shader (`background/animated_background/shaders/waves.frag.glsl`). It renders into an offscreen texture at `resolution_scale` × the window size, at no more than `target_fps`, and is upscaled to the window every frame. While animation is disabled, the scene is drawn once and then only copied.
-
-### Customizing
-- Press **F1** to open the Background Settings panel. Every color, animation, lighting, rendering and per-layer value updates live.
-- **Save** writes `background.cfg` (plain `key = value` lines) next to the executable. It is loaded automatically at startup, and missing keys keep their defaults.
-
-### Adding a parameter
-1. Add the field to `WaveBackgroundSettings` / `WaveLayerSettings` (`wave_background.h`).
-2. Pack it into a free slot of `BackgroundParamsStd140` in `upload_params()` (`wave_background.cpp`), and mirror it in the `BackgroundParams` block of the shader.
-3. Add a widget in `wave_background_panel.cpp` and a key in `visit_settings()` (`wave_background_config.cpp`).
