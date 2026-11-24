@@ -3,6 +3,10 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 
+#include "wave_background.h"
+#include "wave_background_config.h"
+#include "wave_background_panel.h"
+
 #include <SDL.h>
 
 #ifdef _WIN32
@@ -14,6 +18,7 @@
     #include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -51,7 +56,7 @@ int main(int argc, char** argv) {
     );
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
 #else
     // Raspberry Pi: OpenGL ES
@@ -111,6 +116,13 @@ int main(int argc, char** argv) {
     SDL_GL_MakeCurrent(window, gl);
     SDL_GL_SetSwapInterval(1);
 
+    if (!load_gl_functions()) {
+        SDL_GL_DeleteContext(gl);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
     // Initialize ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -146,6 +158,12 @@ int main(int argc, char** argv) {
 #endif
 
     std::string status;
+
+    WaveBackground background;
+    load_wave_background_settings(background.settings, WAVE_BACKGROUND_CONFIG_PATH);
+    background.init();
+    bool isBackgroundPanelOpen = false;
+    Uint64 lastFrameCounter = SDL_GetPerformanceCounter();
 
     bool running = true;
 
@@ -205,6 +223,12 @@ int main(int argc, char** argv) {
 
             if (event.type == SDL_QUIT) {
                 running = false;
+            }
+
+            if (event.type == SDL_KEYDOWN &&
+                event.key.keysym.sym == SDLK_F1 &&
+                !event.key.repeat) {
+                isBackgroundPanelOpen = !isBackgroundPanelOpen;
             }
         }
 
@@ -277,6 +301,11 @@ int main(int argc, char** argv) {
 
         ImGui::End();
 
+        if (isBackgroundPanelOpen &&
+            draw_wave_background_panel(background.settings, &isBackgroundPanelOpen)) {
+            background.request_redraw();
+        }
+
         // Render
         ImGui::Render();
 
@@ -290,6 +319,20 @@ int main(int argc, char** argv) {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        // Clamped so time spent paused while RPCS3 ran doesn't jump the waves forward.
+        Uint64 frameCounter = SDL_GetPerformanceCounter();
+        double deltaSeconds = std::min(
+            0.1,
+            double(frameCounter - lastFrameCounter) / SDL_GetPerformanceFrequency()
+        );
+        lastFrameCounter = frameCounter;
+
+        background.render(
+            deltaSeconds,
+            (int)(io.DisplaySize.x * io.DisplayFramebufferScale.x),
+            (int)(io.DisplaySize.y * io.DisplayFramebufferScale.y)
+        );
+
         ImGui_ImplOpenGL3_RenderDrawData(
             ImGui::GetDrawData()
         );
@@ -298,6 +341,7 @@ int main(int argc, char** argv) {
     }
 
     // Application shutdown
+    background.shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
 
