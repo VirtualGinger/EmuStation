@@ -1,7 +1,9 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from routes.cartridge import router as cartridge_router
@@ -17,10 +19,14 @@ BASE_DIR = Path(__file__).parent
 CARTRIDGE_PATH = Path("/mnt/emustation-usb")
 EMULATOR_CONFIG = BASE_DIR / "config" / "emulators.json"
 
+load_dotenv(BASE_DIR.parent / "frontend" / ".env")
+
 
 cartridge_manager = CartridgeManager(
     CARTRIDGE_PATH,
-    scan_usb=False
+    # On Linux the start script mounts the USB drive at CARTRIDGE_PATH; Windows
+    # has no such mount, so removable drive letters are scanned instead.
+    scan_usb=os.name == "nt"
 )
 emulator_manager = EmulatorManager(EMULATOR_CONFIG)
 process_manager = ProcessManager()

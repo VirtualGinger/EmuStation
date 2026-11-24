@@ -2,6 +2,10 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 
+#include "wave_background.h"
+#include "wave_background_config.h"
+#include "wave_background_panel.h"
+
 #include <SDL.h>
 #include <SDL_image.h>
 
@@ -295,7 +299,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 #else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -339,6 +343,15 @@ int main(int argc, char** argv) {
     SDL_GL_MakeCurrent(window, gl);
     SDL_GL_SetSwapInterval(1);
 
+    if (!load_gl_functions()) {
+        SDL_GL_DeleteContext(gl);
+        SDL_DestroyWindow(window);
+        IMG_Quit();
+        SDL_Quit();
+        curl_global_cleanup();
+        return 1;
+    }
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
@@ -381,6 +394,12 @@ int main(int argc, char** argv) {
         }
     }
 
+    WaveBackground background;
+    load_wave_background_settings(background.settings, WAVE_BACKGROUND_CONFIG_PATH);
+    background.init();
+    bool isBackgroundPanelOpen = false;
+    Uint64 lastFrameCounter = SDL_GetPerformanceCounter();
+
     Uint32 lastStatusCheck = SDL_GetTicks();
 
     while (running) {
@@ -393,6 +412,11 @@ int main(int argc, char** argv) {
             if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
                 running = false;
 	    }
+            if (event.type == SDL_KEYDOWN &&
+                event.key.keysym.sym == SDLK_F1 &&
+                !event.key.repeat) {
+                isBackgroundPanelOpen = !isBackgroundPanelOpen;
+            }
         }
 
         const Uint32 currentTime = SDL_GetTicks();
@@ -510,10 +534,30 @@ int main(int argc, char** argv) {
         ImGui::EndGroup();
         ImGui::End();
 
+        if (isBackgroundPanelOpen &&
+            draw_wave_background_panel(background.settings, &isBackgroundPanelOpen)) {
+            background.request_redraw();
+        }
+
         ImGui::Render();
         glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        // Clamped so a stall (e.g. a slow API request) doesn't jump the waves forward.
+        Uint64 frameCounter = SDL_GetPerformanceCounter();
+        double deltaSeconds = std::min(
+            0.1,
+            double(frameCounter - lastFrameCounter) / SDL_GetPerformanceFrequency()
+        );
+        lastFrameCounter = frameCounter;
+
+        background.render(
+            deltaSeconds,
+            (int)(io.DisplaySize.x * io.DisplayFramebufferScale.x),
+            (int)(io.DisplaySize.y * io.DisplayFramebufferScale.y)
+        );
+
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
     }
@@ -522,6 +566,7 @@ int main(int argc, char** argv) {
         glDeleteTextures(1, &coverTexture);
     }
 
+    background.shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();

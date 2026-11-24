@@ -1,18 +1,26 @@
 
 import asyncio
+import ctypes
+import os
+import string
 from pathlib import Path
 
 from services.metadata_manager import read_metadata
 
 
+WINDOWS_DRIVE_REMOVABLE = 2
+
+
 class CartridgeManager:
 
-    def __init__(self, cartridge_path=None, scan_usb=True):
-        self.cartridge_path = (
+    def __init__(self, cartridge_path=None, scan_usb=False):
+        self.configured_path = (
             Path(cartridge_path).resolve()
             if cartridge_path is not None
             else None
         )
+        # Path of the cartridge currently detected; routes read it to locate the game.
+        self.cartridge_path = self.configured_path
         self.scan_usb = scan_usb
 
         self.cartridge_state = {
@@ -21,7 +29,21 @@ class CartridgeManager:
             "game": None
         }
 
+    def _get_windows_removable_drives(self):
+        kernel32 = ctypes.windll.kernel32
+        drive_bitmask = kernel32.GetLogicalDrives()
+
+        return [
+            Path(f"{letter}:\\")
+            for index, letter in enumerate(string.ascii_uppercase)
+            if drive_bitmask & (1 << index)
+            and kernel32.GetDriveTypeW(f"{letter}:\\") == WINDOWS_DRIVE_REMOVABLE
+        ]
+
     def _get_mounted_drives(self):
+        if os.name == "nt":
+            return self._get_windows_removable_drives()
+
         mount_roots = (
             Path("/media"),
             Path("/mnt"),
@@ -106,8 +128,8 @@ class CartridgeManager:
                     invalid_drive_found = True
 
         # Optional explicitly configured test cartridge.
-        if self.cartridge_path and self.cartridge_path.is_dir():
-            if self._check_cartridge(self.cartridge_path):
+        if self.configured_path and self.configured_path.is_dir():
+            if self._check_cartridge(self.configured_path):
                 return
 
             invalid_drive_found = True

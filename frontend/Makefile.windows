@@ -1,4 +1,15 @@
 
+ifneq ($(findstring msys,$(MAKE_HOST)),)
+$(error Use mingw32-make -f Makefile.windows; MSYS make cannot run the cmd recipes below)
+endif
+
+# Recipes use cmd syntax so the build works from Git Bash, PowerShell or cmd alike.
+SHELL := cmd.exe
+
+# MSYS2's ld.exe loads zlib/zstd DLLs from PATH; Git for Windows ships incompatible
+# copies in its mingw64\bin, which makes ld crash (exit 116) unless MSYS2 comes first.
+export PATH := $(shell pkg-config --variable=prefix sdl2)/bin;$(PATH)
+
 CXX := g++
 TARGET := frontend.exe
 
@@ -10,12 +21,12 @@ IMGUI_SRC := $(IMGUI)/imgui.cpp $(IMGUI)/imgui_draw.cpp \
              $(IMGUI)/backends/imgui_impl_sdl2.cpp \
              $(IMGUI)/backends/imgui_impl_opengl3.cpp
 
-SRC := prototype_main.cpp $(IMGUI_SRC)
-OBJ := $(SRC:%.cpp=build/%.o)
+SRC := home.cpp $(wildcard background/animated_background/*.cpp) $(IMGUI_SRC)
+OBJ := $(SRC:%.cpp=build/windows/%.o)
 
 CXXFLAGS := -O2 -std=c++17 -Wall -MMD -MP \
-            -I$(IMGUI) -I$(IMGUI)/backends \
-            $(shell pkg-config --libs sdl2 SDL2_image libcurl)
+            -I$(IMGUI) -I$(IMGUI)/backends -Ibackground/animated_background \
+            $(shell pkg-config --cflags sdl2 SDL2_image libcurl)
 
 LDLIBS := $(shell pkg-config --libs sdl2 SDL2_image libcurl) -lopengl32
 
@@ -26,8 +37,8 @@ all: $(TARGET)
 $(TARGET): $(OBJ)
 	$(CXX) $(OBJ) -o $@ $(LDLIBS)
 
-build/%.o: %.cpp | $(IMGUI)/imgui.h
-	@mkdir -p $(dir $@)
+build/windows/%.o: %.cpp | $(IMGUI)/imgui.h
+	@if not exist "$(subst /,\,$(@D))" mkdir "$(subst /,\,$(@D))"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(IMGUI_SRC): | $(IMGUI)/imgui.h
@@ -36,12 +47,13 @@ $(IMGUI)/imgui.h:
 	git clone --depth 1 --branch $(IMGUI_REF) https://github.com/ocornut/imgui.git $(IMGUI)
 
 run: $(TARGET)
-	./$(TARGET) --windowed
+	$(TARGET) --windowed
 
 clean:
-	rm -rf build $(TARGET)
+	if exist build\windows rmdir /s /q build\windows
+	if exist $(TARGET) del /q $(TARGET)
 
 distclean: clean
-	rm -rf $(IMGUI)
+	if exist $(IMGUI) rmdir /s /q $(IMGUI)
 
 -include $(OBJ:.o=.d)

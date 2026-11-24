@@ -7,11 +7,11 @@ IMGUI_SRC := $(IMGUI)/imgui.cpp $(IMGUI)/imgui_draw.cpp \
              $(IMGUI)/imgui_tables.cpp $(IMGUI)/imgui_widgets.cpp \
              $(IMGUI)/backends/imgui_impl_sdl2.cpp \
              $(IMGUI)/backends/imgui_impl_opengl3.cpp
-SRC := prototype_main.cpp $(IMGUI_SRC)
-OBJ := $(SRC:%.cpp=build/%.o)
+SRC := home.cpp $(wildcard background/animated_background/*.cpp) $(IMGUI_SRC)
+OBJ := $(SRC:%.cpp=build/linux/%.o)
 
 CXXFLAGS ?= -O2
-CXXFLAGS += -std=c++17 -Wall -MMD -MP -I$(IMGUI) -I$(IMGUI)/backends \
+CXXFLAGS += -std=c++17 -Wall -MMD -MP -I$(IMGUI) -I$(IMGUI)/backends -Ibackground/animated_background \
             $(shell pkg-config --cflags sdl2 SDL2_image libcurl)
 LDLIBS := $(shell pkg-config --libs sdl2 SDL2_image libcurl) -lGLESv2
 
@@ -21,7 +21,7 @@ all: $(TARGET)
 $(TARGET): $(OBJ)
 	$(CXX) $(OBJ) -o $@ $(LDLIBS)
 
-build/%.o: %.cpp | $(IMGUI)/imgui.h
+build/linux/%.o: %.cpp | $(IMGUI)/imgui.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -35,7 +35,7 @@ run: $(TARGET)
 	./$(TARGET) --windowed
 
 clean:
-	rm -rf build $(TARGET)
+	rm -rf build/linux $(TARGET)
 
 distclean: clean
 	rm -rf $(IMGUI)
