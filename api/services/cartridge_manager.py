@@ -26,7 +26,7 @@ class CartridgeManager:
         self.cartridge_state = {
             "connected": False,
             "status": "no_cartridge",
-            "game": None
+            "games": []
         }
 
     def _get_windows_removable_drives(self):
@@ -95,7 +95,7 @@ class CartridgeManager:
                 "connected": True,
                 "status": "ready",
                 "cartridge_id": metadata["cartridge_id"],
-                "game": metadata["game"]
+                "games": metadata["games"]
             }
 
             return True
@@ -143,11 +143,21 @@ class CartridgeManager:
                 if invalid_drive_found
                 else "no_cartridge"
             ),
-            "game": None
+            "games": []
         }
 
     def get_status(self):
         return self.cartridge_state
+
+    def get_game(self, game_id):
+        return next(
+            (
+                game
+                for game in self.cartridge_state["games"]
+                if game["id"] == game_id
+            ),
+            None
+        )
 
     async def monitor(self):
         while True:

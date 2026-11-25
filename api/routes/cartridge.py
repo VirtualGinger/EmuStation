@@ -13,29 +13,19 @@ def get_cartridge_status(request: Request):
     return manager.get_status()
 
 
-@router.get("/game")
-def get_cartridge_game(request: Request):
+@router.get("/games")
+def get_cartridge_games(request: Request):
+    return request.app.state.cartridge_manager.get_status()["games"]
+
+
+@router.get("/games/{game_id}/cover")
+def get_game_cover(game_id: str, request: Request):
     manager = request.app.state.cartridge_manager
-    status = manager.get_status()
+    game = manager.get_game(game_id)
 
-    if status["status"] != "ready":
-        raise HTTPException(
-            status_code=404,
-            detail="No valid game cartridge inserted"
-        )
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
 
-    return status["game"]
-
-
-@router.get("/cover")
-def get_cartridge_cover(request: Request):
-    manager = request.app.state.cartridge_manager
-    status = manager.get_status()
-
-    if status["status"] != "ready":
-        raise HTTPException(status_code=404, detail="No game inserted")
-
-    game = status["game"]
     cover = game.get("cover")
 
     if not cover or not manager.cartridge_path:
