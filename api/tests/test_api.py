@@ -32,13 +32,6 @@ class FakeProcess:
 
 @pytest.fixture
 def api_client(valid_cartridge, tmp_path):
-    # Create a PS3-style game directory for the launch test.
-    ps3_game = valid_cartridge / "games" / "Crash Bandicoot"
-    ps3_game_folder = ps3_game / "PS3_GAME"
-
-    ps3_game_folder.mkdir(parents=True, exist_ok=True)
-    (ps3_game_folder / "PARAM.SFO").touch()
-
     config_file = tmp_path / "emulators.json"
 
     config = {
@@ -66,14 +59,6 @@ def api_client(valid_cartridge, tmp_path):
     app.state.process_manager = ProcessManager()
 
     with TestClient(app) as client:
-
-    # Override after FastAPI startup so cartridge detection
-    # cannot overwrite the test game's information.
-        cartridge_manager.cartridge_state["game"]["platform"] = "PS3"
-        cartridge_manager.cartridge_state["game"]["file"] = (
-            "games/Crash Bandicoot"
-        )
-
         yield client
 
 
@@ -92,12 +77,26 @@ def test_get_cartridge_status(api_client):
     assert response.json()["status"] == "ready"
 
 
-def test_get_cartridge_game(api_client):
-    response = api_client.get("/api/cartridge/game")
+def test_get_cartridge_games(api_client):
+    response = api_client.get("/api/cartridge/games")
 
     assert response.status_code == 200
-    assert response.json()["title"] == "Crash Bandicoot"
-    assert response.json()["platform"] == "PS3"
+    assert response.json()[0]["title"] == "Crash Bandicoot"
+    assert response.json()[0]["platform"] == "PS3"
+
+
+def test_cover_for_unknown_game(api_client):
+    response = api_client.get("/api/cartridge/games/missing-game/cover")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Game not found"
+
+
+def test_launch_unknown_game(api_client):
+    response = api_client.post("/api/cartridge/launch/missing-game")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Game not found"
 
 
 def test_launch_game(api_client, monkeypatch):
@@ -115,7 +114,7 @@ def test_launch_game(api_client, monkeypatch):
         fake_popen
     )
 
-    response = api_client.post("/api/cartridge/launch")
+    response = api_client.post("/api/cartridge/launch/crash-bandicoot")
     print("HTTP status:", response.status_code)
     print("Response:", response.json())
 
@@ -140,7 +139,7 @@ def test_launch_status(api_client, monkeypatch):
         lambda command: fake_process
     )
 
-    api_client.post("/api/cartridge/launch")
+    api_client.post("/api/cartridge/launch/crash-bandicoot")
 
     response = api_client.get("/api/launch/status")
 
@@ -156,7 +155,7 @@ def test_stop_game(api_client, monkeypatch):
         lambda command: fake_process
     )
 
-    api_client.post("/api/cartridge/launch")
+    api_client.post("/api/cartridge/launch/crash-bandicoot")
 
     response = api_client.post("/api/launch/stop")
 
@@ -167,15 +166,15 @@ def test_stop_game(api_client, monkeypatch):
 def test_launch_without_cartridge(api_client):
     manager = app.state.cartridge_manager
 
-    manager.cartridge_path = (
-        manager.cartridge_path.parent / "missing"
+    manager.configured_path = (
+        manager.configured_path.parent / "missing"
     )
 
     manager.detect_cartridge()
 
     assert manager.get_status()["status"] == "no_cartridge"
 
-    response = api_client.post("/api/cartridge/launch")
+    response = api_client.post("/api/cartridge/launch/crash-bandicoot")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No valid game cartridge inserted"

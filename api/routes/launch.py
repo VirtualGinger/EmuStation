@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter(prefix="/api", tags=["Game Launch"])
 
 
-@router.post("/cartridge/launch")
-def launch_game(request: Request):
+@router.post("/cartridge/launch/{game_id}")
+def launch_game(game_id: str, request: Request):
     app = request.app
 
     cartridge_manager = app.state.cartridge_manager
@@ -23,7 +23,10 @@ def launch_game(request: Request):
             detail="No valid game cartridge inserted"
         )
 
-    game = status["game"]
+    game = cartridge_manager.get_game(game_id)
+
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
 
     # Resolve and validate the game path.
     cartridge_path = Path(cartridge_manager.cartridge_path).resolve()

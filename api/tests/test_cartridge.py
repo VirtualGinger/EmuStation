@@ -1,5 +1,6 @@
 
 from services.cartridge_manager import CartridgeManager
+from tests.conftest import make_ps3_game
 
 
 def test_cartridge_detected(valid_cartridge):
@@ -12,7 +13,7 @@ def test_cartridge_detected(valid_cartridge):
 
     assert status["connected"] is True
     assert status["status"] == "ready"
-    assert status["game"]["title"] == "Crash Bandicoot"
+    assert status["games"][0]["title"] == "Crash Bandicoot"
 
 
 def test_cartridge_not_detected(tmp_path):
@@ -27,7 +28,7 @@ def test_cartridge_not_detected(tmp_path):
 
     assert status["connected"] is False
     assert status["status"] == "no_cartridge"
-    assert status["game"] is None
+    assert status["games"] == []
 
 
 def test_invalid_cartridge(tmp_path):
@@ -43,7 +44,7 @@ def test_invalid_cartridge(tmp_path):
 
     assert status["connected"] is True
     assert status["status"] == "invalid_cartridge"
-    assert status["game"] is None
+    assert status["games"] == []
 
 
 def test_cartridge_removal(valid_cartridge):
@@ -83,9 +84,7 @@ def test_cartridge_reinsertion(valid_cartridge):
     import json
 
     valid_cartridge.mkdir()
-    (valid_cartridge / "games").mkdir()
-
-    (valid_cartridge / "games" / "crash-bandicoot.chd").touch()
+    make_ps3_game(valid_cartridge / "games" / "Crash Bandicoot")
 
     metadata = {
         "cartridge_id": "CART-001",
@@ -93,7 +92,7 @@ def test_cartridge_reinsertion(valid_cartridge):
             "id": "crash-bandicoot",
             "title": "Crash Bandicoot",
             "platform": "PS3",
-            "file": "games/crash-bandicoot.chd"
+            "file": "games/Crash Bandicoot"
         }
     }
 

@@ -116,50 +116,45 @@ static bool parseApiResponse(
     return true;
 }
 
-static bool checkCartridge(
-    std::string& status,
-    std::string& cartridgeStatus,
-    std::string& gameTitle,
-    std::string& platform
-) {
-    const ApiResponse response = apiRequest("/api/cartridge/status");
-    json data;
-    std::string error;
+struct Game {
+    std::string id;
+    std::string title;
+    std::string platform;
+    std::string titleId;
+    std::string version;
+    GLuint cover = 0;
+    int coverWidth = 0;
+    int coverHeight = 0;
+};
 
-    if (!parseApiResponse(response, data, error)) {
-        status = error;
-        cartridgeStatus = "api_offline";
-        gameTitle.clear();
-        platform.clear();
-        return false;
+// The default ImGui font only has printable ASCII glyphs; anything else renders as '?'.
+static std::string stripUnsupportedGlyphs(const std::string& text) {
+    std::string printable;
+    for (const char character : text) {
+        if (character >= 0x20 && character <= 0x7E) {
+            printable += character;
+        }
     }
-
-    cartridgeStatus = data.value("status", std::string("unknown"));
-    gameTitle.clear();
-    platform.clear();
-
-    if (data.contains("game") && data["game"].is_object()) {
-        const json& game = data["game"];
-        gameTitle = game.value("title", std::string("Unknown Game"));
-        platform = game.value("platform", std::string("Unknown"));
-    }
-
-    if (cartridgeStatus == "ready") {
-        status = "Game detected.";
-    } else if (cartridgeStatus == "invalid_cartridge") {
-        status = "The inserted USB does not contain a supported game.";
-    } else if (cartridgeStatus == "no_cartridge") {
-        status = "Insert a game USB drive to get started.";
-    } else {
-        status = "Cartridge status: " + cartridgeStatus;
-    }
-
-    return true;
+    return printable;
 }
 
-static bool downloadCover(GLuint& texture, int& imageWidth, int& imageHeight,
-                          std::string& error) {
-    const ApiResponse response = apiRequest("/api/cartridge/cover");
+static std::string escapeUrlSegment(const std::string& text) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        return text;
+    }
+
+    char* escaped = curl_easy_escape(curl, text.c_str(), static_cast<int>(text.size()));
+    const std::string segment = escaped ? escaped : text;
+    curl_free(escaped);
+    curl_easy_cleanup(curl);
+    return segment;
+}
+
+static bool downloadCover(Game& game, std::string& error) {
+    const ApiResponse response = apiRequest(
+        "/api/cartridge/games/" + escapeUrlSegment(game.id) + "/cover"
+    );
 
     if (!response.success) {
         error = "Could not connect to the cover endpoint: " + response.error;
@@ -234,20 +229,107 @@ static bool downloadCover(GLuint& texture, int& imageWidth, int& imageHeight,
         return false;
     }
 
-    if (texture != 0) {
-        glDeleteTextures(1, &texture);
-    }
-
-    texture = newTexture;
-    imageWidth = rgba->w;
-    imageHeight = rgba->h;
+    game.cover = newTexture;
+    game.coverWidth = rgba->w;
+    game.coverHeight = rgba->h;
     SDL_FreeSurface(rgba);
     error.clear();
     return true;
 }
 
-static void launchGame(std::string& status, bool& gameRunning) {
-    const ApiResponse response = apiRequest("/api/cartridge/launch", true);
+// Returns true when the set or order of games changed.
+static bool refreshGames(std::string& status, std::vector<Game>& games) {
+    const ApiResponse response = apiRequest("/api/cartridge/status");
+    json data;
+    std::string error;
+    std::vector<Game> detectedGames;
+
+    if (!parseApiResponse(response, data, error)) {
+        status = error;
+    } else {
+        if (data.contains("games") && data["games"].is_array()) {
+            for (const json& entry : data["games"]) {
+                if (!entry.is_object()) {
+                    continue;
+                }
+
+                Game game;
+                game.id = entry.value("id", std::string());
+                game.title = stripUnsupportedGlyphs(entry.value("title", std::string("Unknown Game")));
+                game.platform = stripUnsupportedGlyphs(entry.value("platform", std::string()));
+                game.titleId = stripUnsupportedGlyphs(entry.value("title_id", std::string()));
+                game.version = stripUnsupportedGlyphs(entry.value("version", std::string()));
+                detectedGames.push_back(std::move(game));
+            }
+        }
+
+        const std::string cartridgeStatus = data.value("status", std::string("unknown"));
+        if (cartridgeStatus == "ready") {
+            status = "";
+        } else if (cartridgeStatus == "invalid_cartridge") {
+            status = "The inserted USB does not contain a supported game.";
+        } else if (cartridgeStatus == "no_cartridge") {
+            status = "Insert a game USB drive to get started.";
+        } else {
+            status = "Cartridge status: " + cartridgeStatus;
+        }
+    }
+
+    for (Game& game : detectedGames) {
+        auto previous = std::find_if(games.begin(), games.end(), [&](const Game& known) {
+            return known.id == game.id;
+        });
+
+        if (previous != games.end()) {
+            game.cover = previous->cover;
+            game.coverWidth = previous->coverWidth;
+            game.coverHeight = previous->coverHeight;
+            previous->cover = 0;
+            continue;
+        }
+
+        std::string coverError;
+        if (!downloadCover(game, coverError)) {
+            std::fprintf(stderr, "Cover for %s unavailable: %s\n", game.id.c_str(), coverError.c_str());
+        }
+    }
+
+    for (const Game& removed : games) {
+        if (removed.cover != 0) {
+            glDeleteTextures(1, &removed.cover);
+        }
+    }
+
+    std::sort(detectedGames.begin(), detectedGames.end(), [](const Game& a, const Game& b) {
+        const int order = SDL_strcasecmp(a.title.c_str(), b.title.c_str());
+        return order != 0 ? order < 0 : a.id < b.id;
+    });
+
+    const bool hasChanged = !std::equal(
+        games.begin(), games.end(),
+        detectedGames.begin(), detectedGames.end(),
+        [](const Game& a, const Game& b) { return a.id == b.id; }
+    );
+
+    games = std::move(detectedGames);
+    return hasChanged;
+}
+
+static void drawBanner(ImDrawList* drawList, ImVec2 min, ImVec2 max, const char* text) {
+    drawList->AddRectFilled(min, max, IM_COL32(70, 76, 96, 220), 6.0f);
+    const ImVec2 textSize = ImGui::CalcTextSize(text);
+    drawList->AddText(
+        ImVec2((min.x + max.x - textSize.x) * 0.5f, (min.y + max.y - textSize.y) * 0.5f),
+        IM_COL32(230, 232, 240, 255),
+        text
+    );
+}
+
+static void launchGame(const std::string& gameId, std::string& status, bool& gameRunning) {
+    const ApiResponse response = apiRequest(
+        "/api/cartridge/launch/" + escapeUrlSegment(gameId),
+        true
+    );
     json data;
     std::string error;
 
@@ -375,24 +457,19 @@ int main(int argc, char** argv) {
 #endif
 
     std::string status = "Connecting to EmuStation API...";
-    std::string cartridgeStatus = "checking";
-    std::string gameTitle;
-    std::string platform;
     bool gameRunning = false;
     bool running = true;
 
-    GLuint coverTexture = 0;
-    int coverWidth = 0;
-    int coverHeight = 0;
-    std::string coverError;
-    std::string loadedCoverForTitle;
+    std::vector<Game> games;
+    bool shouldFocusFirstCard = refreshGames(status, games);
+    int focusedCard = -1;
+    float scrollTarget = 0.0f;
+    float scrollPosition = 0.0f;
 
-    checkCartridge(status, cartridgeStatus, gameTitle, platform);
-    if (cartridgeStatus == "ready") {
-        if (downloadCover(coverTexture, coverWidth, coverHeight, coverError)) {
-            loadedCoverForTitle = gameTitle;
-        }
-    }
+    const ImU32 cardFill = IM_COL32(18, 22, 34, 230);
+    const ImU32 cardBorder = IM_COL32(255, 255, 255, 40);
+    const ImU32 titleColor = IM_COL32(240, 242, 248, 255);
+    const ImU32 detailColor = IM_COL32(160, 166, 184, 255);
 
     WaveBackground background;
     load_wave_background_settings(background.settings, WAVE_BACKGROUND_CONFIG_PATH);
@@ -421,21 +498,9 @@ int main(int argc, char** argv) {
 
         const Uint32 currentTime = SDL_GetTicks();
         if (currentTime - lastStatusCheck >= 1500) {
-            checkCartridge(status, cartridgeStatus, gameTitle, platform);
-
-            if (cartridgeStatus == "ready" && gameTitle != loadedCoverForTitle) {
-                if (downloadCover(coverTexture, coverWidth, coverHeight, coverError)) {
-                    loadedCoverForTitle = gameTitle;
-                }
-            } else if (cartridgeStatus != "ready") {
-                if (coverTexture != 0) {
-                    glDeleteTextures(1, &coverTexture);
-                    coverTexture = 0;
-                }
-                coverWidth = 0;
-                coverHeight = 0;
-                loadedCoverForTitle.clear();
-                coverError.clear();
+            if (refreshGames(status, games)) {
+                shouldFocusFirstCard = true;
+                focusedCard = -1;
             }
 
             checkLaunchStatus(gameRunning);
@@ -459,79 +524,234 @@ int main(int argc, char** argv) {
             ImGuiWindowFlags_NoBackground
         );
 
-        const float panelWidth = 560.0f;
-        const float panelHeight = 600.0f;
-        ImGui::SetCursorPos(ImVec2(
-            (viewport->WorkSize.x - panelWidth) * 0.5f,
-            (viewport->WorkSize.y - panelHeight) * 0.5f
-        ));
+        const ImVec2 screen = viewport->WorkSize;
+        const int visibleCardCount = 3;
+        const float gapRatio = 0.08f;
+        const float cardAspect = 0.72f;
+        // Widest cards that fit visibleCardCount across with a gap on every side, capped by height.
+        const float cardHeight = std::min(
+            screen.x / (visibleCardCount + (visibleCardCount + 1) * gapRatio) / cardAspect,
+            screen.y * 0.7f
+        );
+        const float cardWidth = cardHeight * cardAspect;
+        const float cardGap = cardWidth * gapRatio;
+        const float cardPadding = cardWidth * 0.06f;
+        const float cardRounding = cardWidth * 0.05f;
+        // Room above and below the cards so the highlight border is not clipped by the row.
+        const float borderMargin = 4.0f;
+        const float rowTop = (screen.y - cardHeight) * 0.5f;
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float textWidth = cardWidth - cardPadding * 2.0f;
 
-        ImGui::BeginGroup();
-        ImGui::SetNextItemWidth(panelWidth);
-        ImGui::Text("EmuStation");
-        ImGui::Separator();
-        ImGui::Spacing();
+        // Drawn at a fixed screen position so it never moves with window or row scrolling.
+        ImGui::GetWindowDrawList()->AddText(
+            ImVec2(viewport->WorkPos.x + cardGap, viewport->WorkPos.y + cardGap),
+            titleColor,
+            "EmuStation"
+        );
 
-        if (cartridgeStatus == "ready") {
-            ImGui::TextWrapped("%s", gameTitle.c_str());
-            ImGui::TextDisabled("%s", platform.c_str());
-            ImGui::Spacing();
+        if (games.empty()) {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImVec2 cardMin(
+                viewport->WorkPos.x + (screen.x - cardWidth) * 0.5f,
+                viewport->WorkPos.y + rowTop
+            );
+            const ImVec2 cardMax(cardMin.x + cardWidth, cardMin.y + cardHeight);
+            drawList->AddRectFilled(cardMin, cardMax, cardFill, cardRounding);
+            drawList->AddRect(cardMin, cardMax, cardBorder, cardRounding, 0, 1.5f);
 
-            if (coverTexture != 0 && coverWidth > 0 && coverHeight > 0) {
-                const float maxImageWidth = 420.0f;
-                const float maxImageHeight = 340.0f;
-                const float scale = std::min(
-                    maxImageWidth / static_cast<float>(coverWidth),
-                    maxImageHeight / static_cast<float>(coverHeight)
-                );
-                const ImVec2 imageSize(
-                    coverWidth * scale,
-                    coverHeight * scale
-                );
-                const float imageX = (panelWidth - imageSize.x) * 0.5f;
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + imageX);
-                ImGui::Image(
-                    (ImTextureID)(intptr_t)coverTexture,
-                    imageSize,
-                    ImVec2(0, 1),
-                    ImVec2(1, 0)
-                );
-            } else {
-                ImGui::TextWrapped(
-                    "%s",
-                    coverError.empty() ? "Loading game artwork..." : coverError.c_str()
-                );
+            const char* message = "No Game Detected in EmuStation";
+            const ImVec2 messageSize = ImGui::CalcTextSize(message, nullptr, false, textWidth);
+            drawList->AddText(
+                ImGui::GetFont(),
+                ImGui::GetFontSize(),
+                ImVec2(
+                    cardMin.x + (cardWidth - messageSize.x) * 0.5f,
+                    cardMin.y + (cardHeight - messageSize.y) * 0.5f
+                ),
+                titleColor,
+                message,
+                nullptr,
+                textWidth
+            );
+
+            const ImVec2 statusSize = ImGui::CalcTextSize(status.c_str());
+            ImGui::SetCursorPos(ImVec2(
+                std::max(cardGap, (screen.x - statusSize.x) * 0.5f),
+                rowTop + cardHeight + cardGap
+            ));
+            ImGui::PushTextWrapPos(screen.x - cardGap);
+            ImGui::TextDisabled("%s", status.c_str());
+            ImGui::PopTextWrapPos();
+        } else {
+            const float cardStep = cardWidth + cardGap;
+            const int gameCount = static_cast<int>(games.size());
+            const float rowWidth = gameCount * cardStep - cardGap;
+            const float visibleWidth = std::min(gameCount, visibleCardCount) * cardStep - cardGap;
+            const float rowPadding = (screen.x - visibleWidth) * 0.5f;
+            const float maxScroll = std::max(0, gameCount - visibleCardCount) * cardStep;
+            const float* accent = background.settings.accentPrimary;
+            const ImU32 highlightBorder = ImGui::ColorConvertFloat4ToU32(
+                ImVec4(accent[0], accent[1], accent[2], 1.0f)
+            );
+
+            ImGui::SetCursorPos(ImVec2(0.0f, rowTop - borderMargin));
+            ImGui::SetNextWindowContentSize(ImVec2(rowWidth + rowPadding * 2.0f, 0.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::BeginChild(
+                "GameRow",
+                ImVec2(screen.x, cardHeight + borderMargin * 2.0f),
+                ImGuiChildFlags_None,
+                ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoScrollWithMouse |
+                ImGuiWindowFlags_NoBackground
+            );
+
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+                scrollTarget -= (io.MouseWheel + io.MouseWheelH) * cardStep;
+                if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                    scrollTarget -= io.MouseDelta.x;
+                    scrollPosition = scrollTarget;
+                }
             }
 
-            ImGui::Spacing();
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 30.0f);
-            const bool canLaunch = !gameRunning;
-            if (!canLaunch) {
+            const float dragThreshold = io.MouseDragThreshold;
+            const bool wasSwipe =
+                io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] > dragThreshold * dragThreshold;
+            // launchGame can flip gameRunning mid-loop; a snapshot keeps Begin/EndDisabled paired.
+            const bool isLaunchLocked = gameRunning;
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            if (isLaunchLocked) {
                 ImGui::BeginDisabled();
             }
 
-            if (ImGui::Button("Play Game", ImVec2(500.0f, 75.0f))) {
-                launchGame(status, gameRunning);
+            for (size_t index = 0; index < games.size(); ++index) {
+                const Game& game = games[index];
+                ImGui::SetCursorPos(ImVec2(rowPadding + index * cardStep, borderMargin));
+
+                if (index == 0 && shouldFocusFirstCard) {
+                    ImGui::SetKeyboardFocusHere();
+                    shouldFocusFirstCard = false;
+                }
+
+                ImGui::PushID(game.id.c_str());
+                const bool isPressed = ImGui::InvisibleButton("card", ImVec2(cardWidth, cardHeight));
+                ImGui::PopID();
+
+                if (isPressed && !(ImGui::IsMouseReleased(ImGuiMouseButton_Left) && wasSwipe)) {
+                    launchGame(game.id, status, gameRunning);
+                }
+
+                if (ImGui::IsItemFocused() && focusedCard != static_cast<int>(index)) {
+                    focusedCard = static_cast<int>(index);
+                    // Keeps the focused card in the middle slot; the clamp below pins the row ends.
+                    scrollTarget = (static_cast<float>(index) - (visibleCardCount - 1) / 2) * cardStep;
+                }
+
+                const bool isHighlighted = ImGui::IsItemFocused() || ImGui::IsItemHovered();
+                const ImVec2 cardMin = ImGui::GetItemRectMin();
+                const ImVec2 cardMax = ImGui::GetItemRectMax();
+                drawList->AddRectFilled(cardMin, cardMax, cardFill, cardRounding);
+                drawList->AddRect(
+                    cardMin,
+                    cardMax,
+                    isHighlighted ? highlightBorder : cardBorder,
+                    cardRounding,
+                    0,
+                    isHighlighted ? 4.0f : 1.5f
+                );
+
+                const ImVec2 coverMin(cardMin.x + cardPadding, cardMin.y + cardPadding);
+                const ImVec2 coverMax(cardMax.x - cardPadding, cardMin.y + cardHeight * 0.6f);
+                if (game.cover != 0 && game.coverWidth > 0 && game.coverHeight > 0) {
+                    const float scale = std::min(
+                        (coverMax.x - coverMin.x) / game.coverWidth,
+                        (coverMax.y - coverMin.y) / game.coverHeight
+                    );
+                    const ImVec2 imageMin(
+                        coverMin.x + (coverMax.x - coverMin.x - game.coverWidth * scale) * 0.5f,
+                        coverMin.y + (coverMax.y - coverMin.y - game.coverHeight * scale) * 0.5f
+                    );
+                    drawList->AddImage(
+                        (ImTextureID)(intptr_t)game.cover,
+                        imageMin,
+                        ImVec2(imageMin.x + game.coverWidth * scale, imageMin.y + game.coverHeight * scale)
+                    );
+                } else {
+                    const float coverCenterY = (coverMin.y + coverMax.y) * 0.5f;
+                    drawBanner(
+                        drawList,
+                        ImVec2(coverMin.x, coverCenterY - lineHeight),
+                        ImVec2(coverMax.x, coverCenterY + lineHeight),
+                        "Unavailable"
+                    );
+                }
+
+                const float detailTop = cardMax.y - cardPadding - lineHeight;
+                const ImVec4 titleClip(coverMin.x, coverMax.y, coverMax.x, detailTop);
+                drawList->AddText(
+                    ImGui::GetFont(),
+                    ImGui::GetFontSize(),
+                    ImVec2(coverMin.x, coverMax.y + cardPadding * 0.5f),
+                    titleColor,
+                    game.title.c_str(),
+                    nullptr,
+                    textWidth,
+                    &titleClip
+                );
+
+                if (game.titleId.empty() && game.version.empty()) {
+                    drawBanner(
+                        drawList,
+                        ImVec2(coverMin.x, detailTop - 4.0f),
+                        ImVec2(coverMax.x, detailTop + lineHeight + 4.0f),
+                        "Unavailable"
+                    );
+                } else {
+                    std::string details = game.platform;
+                    if (!game.titleId.empty()) {
+                        details += (details.empty() ? "" : " | ") + game.titleId;
+                    }
+                    if (!game.version.empty()) {
+                        details += (details.empty() ? "v" : " | v") + game.version;
+                    }
+
+                    const ImVec4 detailClip(coverMin.x, detailTop, coverMax.x, cardMax.y);
+                    drawList->AddText(
+                        ImGui::GetFont(),
+                        ImGui::GetFontSize(),
+                        ImVec2(coverMin.x, detailTop),
+                        detailColor,
+                        details.c_str(),
+                        nullptr,
+                        0.0f,
+                        &detailClip
+                    );
+                }
             }
 
-            if (!canLaunch) {
+            if (isLaunchLocked) {
                 ImGui::EndDisabled();
             }
 
+            scrollTarget = std::clamp(scrollTarget, 0.0f, maxScroll);
+            scrollPosition = std::clamp(scrollPosition, 0.0f, maxScroll);
+            scrollPosition += (scrollTarget - scrollPosition) * std::min(1.0f, io.DeltaTime * 12.0f);
+            ImGui::SetScrollX(scrollPosition);
+
+            ImGui::EndChild();
+            ImGui::PopStyleVar();
+
+            const float statusTop = screen.y - cardGap - lineHeight;
             if (gameRunning) {
+                ImGui::SetCursorPos(ImVec2(cardGap, statusTop - lineHeight * 1.5f));
                 ImGui::TextDisabled("Game is running. Press the controller Home button to return.");
             }
-        } else {
-            ImGui::Spacing();
-            ImGui::TextWrapped("%s", status.c_str());
-            ImGui::Spacing();
-            ImGui::TextDisabled("Insert a USB game drive to continue.");
+            ImGui::SetCursorPos(ImVec2(cardGap, statusTop));
+            ImGui::TextUnformatted(status.c_str());
         }
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextWrapped("%s", status.c_str());
-        ImGui::EndGroup();
         ImGui::End();
 
         if (isBackgroundPanelOpen &&
@@ -562,8 +782,10 @@ int main(int argc, char** argv) {
         SDL_GL_SwapWindow(window);
     }
 
-    if (coverTexture != 0) {
-        glDeleteTextures(1, &coverTexture);
+    for (const Game& game : games) {
+        if (game.cover != 0) {
+            glDeleteTextures(1, &game.cover);
+        }
     }
 
     background.shutdown();
